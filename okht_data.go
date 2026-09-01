@@ -106,3 +106,91 @@ func (d *loginDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
+
+
+2=============================
+
+package services
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"ton-module/internal/client" // ⚠️ adapte au chemin exact de ton go.mod
+)
+
+func NewLoginDataSource() datasource.DataSource {
+	return &loginDataSource{}
+}
+
+type loginDataSource struct {
+	client *client.APIClient
+}
+
+type loginDataSourceModel struct {
+	ID       types.String `tfsdk:"id"`
+	Username types.String `tfsdk:"username"`
+	Email    types.String `tfsdk:"email"`
+}
+
+func (d *loginDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_login"
+}
+
+func (d *loginDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Informations sur l'utilisateur actuellement authentifié",
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed: true,
+			},
+			"username": schema.StringAttribute{
+				Computed: true,
+			},
+			"email": schema.StringAttribute{
+				Computed: true,
+			},
+		},
+	}
+}
+
+func (d *loginDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
+	apiClient, ok := req.ProviderData.(*client.APIClient)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Type de données du provider inattendu",
+			fmt.Sprintf("Attendu *client.APIClient, reçu %T", req.ProviderData),
+		)
+		return
+	}
+	d.client = apiClient
+}
+
+// Read ne fait aucun appel réseau : les infos ont déjà été récupérées
+// lors du login initial dans provider.go → Configure()
+func (d *loginDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	if d.client == nil || d.client.Token == "" {
+		resp.Diagnostics.AddError(
+			"Client non authentifié",
+			"Le token bearer est vide — le login n'a probablement pas réussi dans Configure() du provider.",
+		)
+		return
+	}
+
+	state := loginDataSourceModel{
+		ID:       types.StringValue(d.client.UserID),
+		Username: types.StringValue(d.client.Username),
+		Email:    types.StringValue(d.client.Email),
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
